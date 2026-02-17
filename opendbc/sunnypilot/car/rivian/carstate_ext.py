@@ -17,7 +17,7 @@ ButtonType = structs.CarState.ButtonEvent.Type
 
 # VDM_UserAdasRequest: 0=IDLE, 1=UP_1, 2=UP_2, 3=DOWN_1, 4=DOWN_2
 VDM_BUTTON_MAP = {
-  1: ButtonType.lkas,    # Toggle MADS
+  2: ButtonType.lkas,    # Toggle MADS
 }
 
 
@@ -33,6 +33,7 @@ class CarStateExt:
     self.set_speed = 10
     self.increase_button = False
     self.decrease_button = False
+    self.stalk_down = False
     self.distance_button = 0
     self.increase_counter = 0
     self.decrease_counter = 0
