@@ -16,6 +16,7 @@ class CarState(CarStateBase, CarStateExt):
     self.last_speed = 30
 
     self.acm_lka_hba_cmd = None
+    self.eps_toi_fault = False
 
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
     cp = can_parsers[Bus.pt]
@@ -43,6 +44,7 @@ class CarState(CarStateBase, CarStateExt):
     ret.steeringRateDeg = cp_adas.vl["EPAS_AdasStatus"]["EPAS_SteeringAngleSpeed"]
     ret.steeringTorque = cp.vl["EPAS_SystemStatus"]["EPAS_TorsionBarTorque"]
     ret.steeringPressed = self.update_steering_pressed(abs(ret.steeringTorque) > 1.0, 5)
+    self.eps_toi_fault = cp.vl["EPAS_SystemStatus"]["H_CAN_EPSS_ToiFlt"] == 1
 
     ret.steerFaultTemporary = cp_adas.vl["EPAS_AdasStatus"]["EPAS_EacErrorCode"] != 0
 
