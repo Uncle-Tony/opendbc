@@ -46,7 +46,7 @@ class CarState(CarStateBase, CarStateExt):
     ret.steeringPressed = self.update_steering_pressed(abs(ret.steeringTorque) > 1.0, 5)
     self.eps_toi_fault = cp.vl["EPAS_SystemStatus"]["H_CAN_EPSS_ToiFlt"] == 1
 
-    ret.steerFaultTemporary = cp_adas.vl["EPAS_AdasStatus"]["EPAS_EacErrorCode"] != 0
+    ret.steerFaultTemporary = cp_adas.vl["EPAS_AdasStatus"]["EPAS_EacErrorCode"] != 0 or self.eps_toi_fault
 
     # Cruise state
     speed = min(int(cp_cam.vl["ACM_tsrCmd"]["ACM_tsrSpdDisClsMain"]), 85)
