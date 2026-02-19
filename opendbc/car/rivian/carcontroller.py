@@ -1,12 +1,17 @@
 import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus
-from opendbc.car.lateral import apply_driver_steer_torque_limits
+from opendbc.car.lateral import apply_driver_steer_torque_limits, common_fault_avoidance
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.rivian.riviancan import create_lka_steering, create_longitudinal
 from opendbc.car.rivian.values import CarControllerParams
 
 from opendbc.sunnypilot.car.rivian.mads import MadsCarController
+
+# Matches Hyundai fault avoidance parameters; Rivian is also 100Hz so no adjustment needed.
+MAX_ANGLE = 85
+MAX_ANGLE_FRAMES = 89
+MAX_ANGLE_CONSECUTIVE_FRAMES = 2
 
 
 class CarController(CarControllerBase, MadsCarController):
@@ -14,6 +19,7 @@ class CarController(CarControllerBase, MadsCarController):
     CarControllerBase.__init__(self, dbc_names, CP, CP_SP)
     MadsCarController.__init__(self)
     self.apply_torque_last = 0
+    self.angle_limit_counter = 0
     self.packer = CANPacker(dbc_names[Bus.pt])
 
   def update(self, CC, CC_SP, CS, now_nanos):
@@ -29,9 +35,18 @@ class CarController(CarControllerBase, MadsCarController):
       apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last,
                                                       CS.out.steeringTorque, CarControllerParams, steer_max)
 
+    # Cut ACM_lkaActToi + zero torque for 2 frames after 89 frames above MAX_ANGLE,
+    # matching Hyundai's fault avoidance pattern.
+    self.angle_limit_counter, apply_steer_req = common_fault_avoidance(
+      abs(CS.out.steeringAngleDeg) >= MAX_ANGLE, CC.latActive,
+      self.angle_limit_counter, MAX_ANGLE_FRAMES, MAX_ANGLE_CONSECUTIVE_FRAMES)
+
+    if not apply_steer_req:
+      apply_torque = 0
+
     # send steering command
     self.apply_torque_last = apply_torque
-    can_sends.append(create_lka_steering(self.packer, self.frame, CS.acm_lka_hba_cmd, apply_torque, CC.enabled, CC.latActive, self.mads))
+    can_sends.append(create_lka_steering(self.packer, self.frame, CS.acm_lka_hba_cmd, apply_torque, CC.enabled, CC.latActive, self.mads, apply_steer_req))
 
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
