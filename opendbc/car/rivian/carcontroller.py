@@ -35,14 +35,11 @@ class CarController(CarControllerBase, MadsCarController):
       apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last,
                                                       CS.out.steeringTorque, CarControllerParams, steer_max)
 
-    # Cut ACM_lkaActToi + zero torque for 2 frames after 89 frames above MAX_ANGLE,
-    # matching Hyundai's fault avoidance pattern.
+    # Cut ACM_lkaActToi for 2 frames after 89 frames above MAX_ANGLE.
+    # Torque continues to be sent normally; EPS ignores it while enable bit is low.
     self.angle_limit_counter, apply_steer_req = common_fault_avoidance(
       abs(CS.out.steeringAngleDeg) >= MAX_ANGLE, CC.latActive,
       self.angle_limit_counter, MAX_ANGLE_FRAMES, MAX_ANGLE_CONSECUTIVE_FRAMES)
-
-    if not apply_steer_req:
-      apply_torque = 0
 
     # send steering command
     self.apply_torque_last = apply_torque
