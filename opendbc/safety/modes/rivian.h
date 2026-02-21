@@ -8,6 +8,7 @@
 
 #define RIVIAN_ACM_STEERING_CONTROL 0x110U
 #define RIVIAN_ACM_LKA_HBA_CMD      0x120U
+#define RIVIAN_ACM_STATUS           0x100U
 #define RIVIAN_SAS_STATUS           0x40U
 #define RIVIAN_VDM_OUTPUT_SIGNALS   0x152U
 
@@ -15,6 +16,7 @@ static safety_config rivian_init(uint16_t param) {
   static const CanMsg RIVIAN_STOCK_TX_MSGS[] = {
     {RIVIAN_ACM_STEERING_CONTROL, 0, 8, .check_relay = true},
     {RIVIAN_ACM_LKA_HBA_CMD, 0, 8, .check_relay = true},
+    {RIVIAN_ACM_STATUS, 0, 8, .check_relay = true},
   };
 
   static RxCheck rivian_rx_checks[] = {
