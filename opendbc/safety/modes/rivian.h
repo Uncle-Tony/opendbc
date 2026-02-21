@@ -3,16 +3,18 @@
 #include "opendbc/safety/declarations.h"
 
 // Rivian Primary Actuator CAN (merged DBC) - angle-based steering
-// TX: 0x110 ACM_SteeringControl (ACM_SteeringAngleRequest in deg)
+// TX: 0x110 ACM_SteeringControl (angle), 0x120 ACM_lkaHbaCmd (lane detection, torque=0 when angle)
 // RX: 0x40 SAS_Status (steering angle sensor), 0x152 VDM_OutputSignals (vehicle speed, EPAS mode)
 
 #define RIVIAN_ACM_STEERING_CONTROL 0x110U
+#define RIVIAN_ACM_LKA_HBA_CMD      0x120U
 #define RIVIAN_SAS_STATUS           0x40U
 #define RIVIAN_VDM_OUTPUT_SIGNALS   0x152U
 
 static safety_config rivian_init(uint16_t param) {
   static const CanMsg RIVIAN_STOCK_TX_MSGS[] = {
     {RIVIAN_ACM_STEERING_CONTROL, 0, 8, .check_relay = true},
+    {RIVIAN_ACM_LKA_HBA_CMD, 0, 8, .check_relay = true},
   };
 
   static RxCheck rivian_rx_checks[] = {

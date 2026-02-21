@@ -1,9 +1,9 @@
 import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus
-from opendbc.car.lateral import apply_driver_steer_torque_limits
+from opendbc.car import structs
 from opendbc.car.interfaces import CarControllerBase
-from opendbc.car.rivian.riviancan import create_lka_steering, create_longitudinal, create_wheel_touch, create_adas_status
+from opendbc.car.rivian.riviancan import create_angle_steering, create_lka_steering, create_longitudinal, create_wheel_touch, create_adas_status
 from opendbc.car.rivian.values import CarControllerParams
 
 from opendbc.sunnypilot.car.rivian.mads import MadsCarController
@@ -13,7 +13,6 @@ class CarController(CarControllerBase, MadsCarController):
   def __init__(self, dbc_names, CP, CP_SP):
     CarControllerBase.__init__(self, dbc_names, CP, CP_SP)
     MadsCarController.__init__(self)
-    self.apply_torque_last = 0
     self.packer = CANPacker(dbc_names[Bus.pt])
 
     self.cancel_frames = 0
@@ -23,17 +22,15 @@ class CarController(CarControllerBase, MadsCarController):
     actuators = CC.actuators
     can_sends = []
 
-    apply_torque = 0
-    steer_max = round(float(np.interp(CS.out.vEgoRaw, CarControllerParams.STEER_MAX_LOOKUP[0],
-                                      CarControllerParams.STEER_MAX_LOOKUP[1])))
-    if self.mads.lat_active:
-      new_torque = int(round(CC.actuators.torque * steer_max))
-      apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last,
-                                                      CS.out.steeringTorque, CarControllerParams, steer_max)
-
-    # send steering command
-    self.apply_torque_last = apply_torque
-    can_sends.append(create_lka_steering(self.packer, self.frame, CS.acm_lka_hba_cmd, apply_torque, CC.enabled, CC.latActive, self.mads))
+    # Angle-based only: send ACM_SteeringControl (0x110) and 0x120
+    can_sends.append(create_angle_steering(
+      self.packer, self.frame,
+      actuators.steeringAngleDeg,
+      self.mads.lat_active,
+    ))
+    can_sends.append(create_lka_steering(
+      self.packer, self.frame, CS.acm_lka_hba_cmd, CC.latActive, self.mads,
+    ))
 
     if self.frame % 5 == 0:
       can_sends.append(create_wheel_touch(self.packer, CS.sccm_wheel_touch, CC.enabled))
@@ -55,8 +52,5 @@ class CarController(CarControllerBase, MadsCarController):
       can_sends.append(create_adas_status(self.packer, CS.vdm_adas_status, interface_status))
 
     new_actuators = actuators.as_builder()
-    new_actuators.torque = apply_torque / steer_max
-    new_actuators.torqueOutputCan = apply_torque
-
     self.frame += 1
     return new_actuators, can_sends

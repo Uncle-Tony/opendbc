@@ -11,32 +11,42 @@ def checksum(data, poly, xor_output):
   return crc ^ xor_output
 
 
-def create_lka_steering(packer, frame, acm_lka_hba_cmd, apply_torque, enabled, active, mads):
-  # forward auto high beam and speed limit status and nothing else
-  values = {s: acm_lka_hba_cmd[s] for s in (
-    "ACM_hbaSysState",
-    "ACM_hbaLamp",
-    "ACM_hbaOnOffState",
-    "ACM_slifOnOffState",
-  )}
-
-  values |= {
-    "ACM_lkaHbaCmd_Counter": frame % 15,
-    "ACM_lkaStrToqReq": apply_torque,
-    "ACM_lkaActToi": mads.lat_active,
-
-    "ACM_lkaLaneRecogState": 3 if mads.lka_icon_states else 0,
-    "ACM_lkaSymbolState": 3 if mads.lka_icon_states else 0,
-
-    # static values
-    "ACM_lkaElkRequest": 0,
-    "ACM_ldwlkaOnOffState": 2,  # 2=LKAS+LDW on
-    "ACM_elkOnOffState": 1,  # 1=LKAS on
-    # TODO: what are these used for?
-    "ACM_ldwWarnTypeState": 2,  # always 2
-    "ACM_ldwWarnTimingState": 1,  # always 1
-    #"ACM_lkaHandsoffDisplayWarning": 1,  # TODO: we can send this when openpilot wants you to pay attention
+def create_angle_steering(packer, frame, angle_deg, active):
+  """Pack ACM_SteeringControl (0x110) for angle-based control. DBC: ACM_SteeringAngleRequest 23|15@0+ (0.1, -1638.4) deg."""
+  # Clamp to DBC range so packer produces valid 15-bit raw
+  angle_clip = max(-1638.4, min(1638.3, float(angle_deg)))
+  values = {
+    "ACM_SteeringControl_Counter": frame % 15,
+    "ACM_EacEnabled": 2 if active else 0,  # 2 = EAC enabled
+    "ACM_HapticRequired": 0,
+    "ACM_SteeringAngleRequest": angle_clip,
   }
+  data = packer.make_can_msg("ACM_SteeringControl", 0, values)[1]
+  values["ACM_SteeringControl_Checksum"] = checksum(data[1:], 0x1D, 0x41)
+  return packer.make_can_msg("ACM_SteeringControl", 0, values)
+
+
+def create_lka_steering(packer, frame, acm_lka_hba_cmd, active, mads):
+  # 0x120 ACM_lkaHbaCmd: passthrough when controls inactive; when active, only override LKA/symbol/lane/warning states (no torque).
+  defaults = {"ACM_hbaSysState": 1, "ACM_hbaLamp": 0, "ACM_hbaOpt": 1, "ACM_FailinfoAeb": 0}
+  values = {s: acm_lka_hba_cmd.get(s, defaults[s]) for s in defaults} if acm_lka_hba_cmd else defaults.copy()
+  if acm_lka_hba_cmd:
+    values.update(acm_lka_hba_cmd)  # start from car's message
+  values["ACM_lkaHbaCmd_Counter"] = frame % 15
+
+  if active:
+    values |= {
+      "ACM_HapticRequest": 0,
+      "ACM_lkaStrToqReq": 0,  # angle mode: no torque on 0x120
+      "ACM_lkaSymbolState": 3 if mads.lka_icon_states else 2,
+      "ACM_lkaToiFlt": 0,
+      "ACM_lkaActToi": 0,
+      "ACM_lkaLaneRecogState": 3 if mads.lka_icon_states else 0,
+      "ACM_lkaRHWarning": 0,
+      "ACM_lkaLHWarning": 0,
+      "ACM_lkaHandsoffSoundWarning": 0,
+      "ACM_lkaHandsoffDisplayWarning": 0,
+    }
 
   data = packer.make_can_msg("ACM_lkaHbaCmd", 0, values)[1]
   values["ACM_lkaHbaCmd_Checksum"] = checksum(data[1:], 0x1D, 0x63)
@@ -66,9 +76,9 @@ def create_longitudinal(packer, frame, accel, enabled):
   values = {
     "ACM_longitudinalRequest_Counter": frame % 15,
     "ACM_AccelerationRequest": accel,
-    "ACM_PrndRequest": 0,
+    "ACM_PrndRequired": 0,
     "ACM_longInterfaceEnable": 1 if enabled else 0,
-    "ACM_VehicleHoldRequest": 0,
+    "ACM_VehicleHoldRequired": 0,
   }
 
   data = packer.make_can_msg("ACM_longitudinalRequest", 0, values)[1]
@@ -77,18 +87,19 @@ def create_longitudinal(packer, frame, accel, enabled):
 
 
 def create_adas_status(packer, vdm_adas_status, interface_status):
+  # Signal names must match rivian_primaryactuatorCAN.dbc VDM_AdasSts (0x162)
   values = {s: vdm_adas_status[s] for s in (
     "VDM_AdasStatus_Checksum",
     "VDM_AdasStatus_Counter",
     "VDM_AdasDecelLimit",
-    "VDM_AdasDriverAccelPriorityStatus",
+    "VDM_AdasDriverAccelPriorityStatu",
     "VDM_AdasFaultStatus",
     "VDM_AdasAccelLimit",
     "VDM_AdasDriverModeStatus",
-    "VDM_AdasUnkown1",
+    "VDM_AdasAccelRequest",
     "VDM_AdasInterfaceStatus",
+    "VDM_AdasAccelRequestAcknowledged",
     "VDM_AdasVehicleHoldStatus",
-    "VDM_UserAdasRequest",
   )}
 
   if interface_status is not None:
