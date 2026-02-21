@@ -26,6 +26,18 @@ def create_angle_steering(packer, frame, angle_deg, active):
   return packer.make_can_msg("ACM_SteeringControl", 0, values)
 
 
+def create_acm_status(packer, frame, feature_status=2):
+  """Pack ACM_Status (0x100). feature_status: 0=Standby, 1=Acc, 2=Hwp, 3=Uf, 4=Faulted. Checksum 0x1D, 0x5F."""
+  values = {
+    "ACM_Status_Counter": frame % 15,
+    "ACM_FeatureStatus": feature_status,
+    "ACM_FaultStatus": 0,
+  }
+  data = packer.make_can_msg("ACM_Status", 0, values)[1]
+  values["ACM_Status_Checksum"] = checksum(data[1:], 0x1D, 0x5F)
+  return packer.make_can_msg("ACM_Status", 0, values)
+
+
 def create_lka_steering(packer, frame, acm_lka_hba_cmd, active, mads):
   # 0x120 ACM_lkaHbaCmd: passthrough when controls inactive; when active, only override LKA/symbol/lane/warning states (no torque).
   defaults = {"ACM_hbaSysState": 1, "ACM_hbaLamp": 0, "ACM_hbaOpt": 1, "ACM_FailinfoAeb": 0}

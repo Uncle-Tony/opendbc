@@ -3,7 +3,7 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus
 from opendbc.car import structs
 from opendbc.car.interfaces import CarControllerBase
-from opendbc.car.rivian.riviancan import create_angle_steering, create_lka_steering, create_longitudinal, create_wheel_touch, create_adas_status
+from opendbc.car.rivian.riviancan import create_angle_steering, create_lka_steering, create_acm_status, create_longitudinal, create_wheel_touch, create_adas_status
 from opendbc.car.rivian.values import CarControllerParams
 
 from opendbc.sunnypilot.car.rivian.mads import MadsCarController
@@ -31,6 +31,8 @@ class CarController(CarControllerBase, MadsCarController):
     can_sends.append(create_lka_steering(
       self.packer, self.frame, CS.acm_lka_hba_cmd, CC.latActive, self.mads,
     ))
+    if CC.latActive:
+      can_sends.append(create_acm_status(self.packer, self.frame, feature_status=2))
 
     if self.frame % 5 == 0:
       can_sends.append(create_wheel_touch(self.packer, CS.sccm_wheel_touch, CC.enabled))
