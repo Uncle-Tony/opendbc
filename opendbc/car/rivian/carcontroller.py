@@ -1,12 +1,17 @@
 import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus
-from opendbc.car.lateral import apply_driver_steer_torque_limits
+from opendbc.car.lateral import apply_driver_steer_torque_limits, common_fault_avoidance
 from opendbc.car.interfaces import CarControllerBase
-from opendbc.car.rivian.riviancan import create_lka_steering, create_longitudinal, create_wheel_touch, create_adas_status
+from opendbc.car.rivian.riviancan import create_lka_steering, create_longitudinal
 from opendbc.car.rivian.values import CarControllerParams
 
 from opendbc.sunnypilot.car.rivian.mads import MadsCarController
+
+# Fault avoidance: one frame send torque=0 and request=0; car needs both to not see LKAS active. Panda allows (0,0) through by skipping rate checks when steer_req=0.
+MAX_ANGLE_DEG = 90
+MAX_ANGLE_FRAMES = 89
+BLIP_FRAMES = 1
 
 
 class CarController(CarControllerBase, MadsCarController):
@@ -15,8 +20,7 @@ class CarController(CarControllerBase, MadsCarController):
     MadsCarController.__init__(self)
     self.apply_torque_last = 0
     self.packer = CANPacker(dbc_names[Bus.pt])
-
-    self.cancel_frames = 0
+    self.angle_limit_counter = 0
 
   def update(self, CC, CC_SP, CS, now_nanos):
     MadsCarController.update(self, CC, CC_SP, CS)
@@ -31,28 +35,28 @@ class CarController(CarControllerBase, MadsCarController):
       apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last,
                                                       CS.out.steeringTorque, CarControllerParams, steer_max)
 
-    # send steering command
-    self.apply_torque_last = apply_torque
-    can_sends.append(create_lka_steering(self.packer, self.frame, CS.acm_lka_hba_cmd, apply_torque, CC.enabled, CC.latActive, self.mads))
+    # Fault avoidance: one frame send torque=0 and request=0 (car requires both to not fault)
+    self.angle_limit_counter, lka_act_toi = common_fault_avoidance(
+      abs(CS.out.steeringAngleDeg) >= MAX_ANGLE_DEG,
+      self.mads.lat_active,
+      self.angle_limit_counter,
+      MAX_ANGLE_FRAMES,
+      BLIP_FRAMES,
+    )
 
-    if self.frame % 5 == 0:
-      can_sends.append(create_wheel_touch(self.packer, CS.sccm_wheel_touch, CC.enabled))
+    blip = self.mads.lat_active and not lka_act_toi
+    send_torque = 0 if blip else apply_torque
+    send_elk_request = 4 if (self.mads.lat_active and not blip) else 0
+    if not blip:
+      self.apply_torque_last = apply_torque
+
+    can_sends.append(create_lka_steering(self.packer, self.frame, CS.acm_lka_hba_cmd, send_torque, CC.enabled, CC.latActive, self.mads, lka_act_toi, send_elk_request))
 
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
       accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
       can_sends.append(create_longitudinal(self.packer, self.frame, accel, CC.enabled))
-    else:
-      interface_status = None
-      if CC.cruiseControl.cancel:
-        # if there is a noEntry, we need to send a status of "available" before the ACM will accept "unavailable"
-        # send "available" right away as the VDM itself takes a few frames to acknowledge
-        interface_status = 1 if self.cancel_frames < 5 else 0
-        self.cancel_frames += 1
-      else:
-        self.cancel_frames = 0
-
-      can_sends.append(create_adas_status(self.packer, CS.vdm_adas_status, interface_status))
+    # VDM_AdasSts not available on this tap - cannot cancel stock ACC
 
     new_actuators = actuators.as_builder()
     new_actuators.torque = apply_torque / steer_max
